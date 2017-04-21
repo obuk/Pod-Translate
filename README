@@ -1,0 +1,26 @@
+NAME
+    Pod::Translate - Pod translator
+
+VERSION
+    This document describes Pod::Translate version 0.0.1
+
+SYNOPSIS
+     perldoc -L EN -o JA perlpod
+
+INSTALLATION
+    To install this module, run the following commands:
+
+     perl Makefile.PL
+     make
+     make test
+     make install
+
+DEPENDENCIES
+    <https://github.com/soimort/translate-shell>
+
+COPYRIGHT AND LICENCE
+    Copyright (c) 2017, KUBO Koichi "<k@obuk.org>". All rights reserved.
+
+    This module is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself. See perlartistic.
+
