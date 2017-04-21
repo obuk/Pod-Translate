@@ -5,7 +5,7 @@ use strict;
 use Carp;
 
 use version;
-our $VERSION = qv('0.0.1');
+our $VERSION = qv('0.0.2');
 
 use parent qw(Pod::Simple);
 
@@ -198,7 +198,6 @@ sub mask {
 
 sub unmask {
   my ($self, $c) = @_;
-  my $s = $c->{s};
   s/$c->{unmask}/do {
     my $k = sprintf $c->{mask}, $1;
     my $v = $c->{symtab}{$k};

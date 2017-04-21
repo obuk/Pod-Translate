@@ -66,3 +66,4 @@
 ^MYMETA\.
 #!end included /usr/share/perl/5.22/ExtUtils/MANIFEST.SKIP
 
+Pod-Translate-
