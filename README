@@ -1,9 +1,6 @@
 NAME
     Pod::Translate - Pod translator
 
-VERSION
-    This document describes Pod::Translate version 0.0.1
-
 SYNOPSIS
      perldoc -L EN -o JA perlpod
 
