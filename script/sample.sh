@@ -41,5 +41,7 @@ do
     output=tmp/$(echo $pod |sed 's/::/\//g').pod
     mkdir -p $(dirname $output)
     echo perldoc -L EN -o JA $pod
-    perldoc -L EN -o JA $pod > $output
+    temp=$(mktemp /tmp/podXXXXX)
+    perldoc -L EN -o JA $pod > $temp
+    mv $temp $output
 done
