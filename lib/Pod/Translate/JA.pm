@@ -5,7 +5,7 @@ use strict;
 use Carp;
 
 use version;
-our $VERSION = qv('0.0.1');
+our $VERSION = qv('0.0.3');
 
 use parent qw(Pod::Translate);
 use utf8;
@@ -29,7 +29,7 @@ use Encode::CJKConstants;
 sub postproc {
   my $han = qr/[!-~]/;
   my $zen = qr/[\p{InHiragana}\p{InKatakana}\p{CJKUnifiedIdeographs}]/;
-  tr/［｛（＜＞）｝］：；/\[{(<>)}\];:/;
+  tr/［｛（＜＞）｝］：；＆/\[{(<>)}\];:&/;
   s/($han)($zen)/$1 $2/g;
   s/($zen)($han)/$1 $2/g;
   s/\s+([\>\)\]\}:;]+)/$1/g;
@@ -42,11 +42,6 @@ __END__
 =head1 NAME
 
 Pod::Translate::JA - to Japanese
-
-
-=head1 VERSION
-
-This document describes Pod::Translate::JA version 0.0.1
 
 =head1 SYNOPSIS
 
