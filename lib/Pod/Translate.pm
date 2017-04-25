@@ -5,7 +5,7 @@ use strict;
 use Carp;
 
 use version;
-our $VERSION = qv('0.0.2');
+our $VERSION = qv('0.0.3');
 
 use parent qw(Pod::Simple);
 
@@ -35,7 +35,12 @@ sub init {
 }
 
 sub translate {
-  my ($self, @in) = @_;
+  my $self = shift;
+  my @trans_opt = @{$self->{trans}};
+  my @in = map { if (ref $_) { push @trans_opt, @$_; () } else { $_ } } @_;
+
+  $self->{hint} = undef;
+
   my $original = local $_ = join ' ', @in;
   $self->preproc;
   my $c = { mask => "\x{200B}id%03d\x{200B}", unmask => qr/(?i:id)(\d{3})/ };
@@ -44,7 +49,7 @@ sub translate {
   binmode $tmp, ":utf8";
   print $tmp $mask;
 
-  my @trans = ('trans', @{$self->{trans}}, -i => "$tmp"); #warn "@trans";
+  my @trans = ('trans', @trans_opt, -i => "$tmp"); #warn "@trans";
   $_ = slurp '-|:utf8', @trans;
   s/[\x{2009}\x{200B}]//g; # thin space
   my $trans = $_;
@@ -52,33 +57,32 @@ sub translate {
   $self->postproc;
   $self->unmask({ %$c, s => $mask, t => $trans });
 
-  unless ($self->encoding) {
-    $self->encoding('utf8');
-    binmode $self->output_fh, ":utf8";
-  }
-
-  print {$self->output_fh} "=begin original\n\n";
-  print {$self->output_fh} $original, "\n";
-  print {$self->output_fh} "\n";
-  print {$self->output_fh} "=end original\n\n";
+  $self->hint(
+    "=begin before_trans\n\n",
+    $mask, "\n\n",
+    "=end before_trans\n\n",
+    "=begin after_trans\n\n",
+    $trans, "\n\n",
+    "=end after_trans\n\n",
+  );
 
   if (my %symtab = %{$c->{symtab}}) {
-    print {$self->output_fh} "=begin before_trans\n\n";
-    print {$self->output_fh} $mask, "\n";
-    print {$self->output_fh} "\n";
-    print {$self->output_fh} "=end before_trans\n\n";
-    print {$self->output_fh} "=begin after_trans\n\n";
-    print {$self->output_fh} $trans, "\n";
-    print {$self->output_fh} "\n";
-    print {$self->output_fh} "=end after_trans\n\n";
-    print {$self->output_fh} "=begin cant_trans\n\n";
-    print {$self->output_fh} "$_ = $symtab{$_}\n" for sort keys %symtab;
-    print {$self->output_fh} "\n";
-    print {$self->output_fh} "=end cant_trans\n\n";
+    $self->hint(
+      "=begin cant_trans\n\n",
+      (map { "$_ = $symtab{$_}\n" } sort keys %symtab), "\n",
+      "=end cant_trans\n\n",
+    );
     return $original;
   }
 
   $_;
+}
+
+sub hint {
+  my $self = shift;
+  $self->{hint} //= [];
+  push @{$self->{hint}}, @_ if @_;
+  wantarray? @{$self->{hint}} : $self->{hint};
 }
 
 sub mask {
@@ -221,6 +225,7 @@ sub _handle_encoding_line {
 
 sub _ponder_Plain {
   my ($self, $para) = @_;
+  my $say_hints = 1;            # xxxxx
   #print "_ponder_Plain: ", Dumper($para);
   my ($command, undef, @text) = @$para;
   if ($command =~ /^=item-text/) {
@@ -231,7 +236,32 @@ sub _ponder_Plain {
     print {$self->output_fh} "$command ";
   } elsif ($command =~ /^Para/) {
 
-    @text = $self->translate(@text);
+    unless ($self->encoding) {
+      $self->encoding('utf8');
+      binmode $self->output_fh, ":utf8";
+    }
+
+    print {$self->output_fh} "=begin original\n\n";
+    print {$self->output_fh} $_, "\n\n" for @text;
+    print {$self->output_fh} "=end original\n\n";
+
+    print {$self->output_fh} "=for engine google\n\n"	if $say_hints >= 2;
+    my @trans = $self->translate([ -e => 'google' ], @text);
+    my @hint = $self->hint;
+    print {$self->output_fh} @hint			if $say_hints >= 2;
+    if (grep /^=begin cant_trans/, @hint) {
+      print {$self->output_fh} "=for engine bing\n\n"	if $say_hints >= 2;
+      my @b = $self->translate([ -e => 'bing' ], @text);
+      my @bh = $self->hint;
+      print {$self->output_fh} @bh			if $say_hints >= 2;
+      unless (grep /^=begin cant_trans/, @bh) {
+        @trans = @b;
+        @hint = @bh;
+      }
+      print {$self->output_fh} @hint			if $say_hints == 1;
+    }
+
+    @text = @trans;
 
   } else {
     print "_ponder_Plain (unknown): ", Dumper($para);
@@ -287,10 +317,6 @@ __END__
 =head1 NAME
 
 Pod::Translate - Pod translator
-
-=head1 VERSION
-
-This document describes Pod::Translate version 0.0.1
 
 =head1 SYNOPSIS
 
