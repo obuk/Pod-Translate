@@ -33,15 +33,4 @@ Pod::Simple
 EOF
 )
 
-PERLDOC=
-PERL5LIB=$PERL5LIB:lib
-
-for pod in $pod_simple
-do
-    output=tmp/$(echo $pod |sed 's/::/\//g').pod
-    mkdir -p $(dirname $output)
-    echo perldoc -L EN -o JA $pod
-    temp=$(mktemp /tmp/podXXXXX)
-    perldoc -L EN -o JA $pod > $temp
-    mv $temp $output
-done
+./sample/perldoc-ja.sh $pod_simple
