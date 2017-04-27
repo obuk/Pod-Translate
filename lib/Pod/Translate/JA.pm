@@ -18,10 +18,7 @@ sub init {
 }
 
 sub preproc {
-  # B<h>elp onB<l>y B<D>escribes B<t>ext B<U>nformatted
-  s/\b((?i:[a-z]*))[BI]<((?i:[a-z]))>((?i:[a-z]+))/$1$2$3/g;
-  # I<not> I<do not> I<any>
-  s/[BI]<((?:do(?:es)?\s)not|any)>/\U$1\E/g;
+  s/[BI]<([[a-z\d\s:;,.]*)>/$1/g;
 }
 
 use Encode::CJKConstants;
@@ -29,10 +26,10 @@ use Encode::CJKConstants;
 sub postproc {
   my $han = qr/[!-~]/;
   my $zen = qr/[\p{InHiragana}\p{InKatakana}\p{CJKUnifiedIdeographs}]/;
-  tr/［｛（＜＞）｝］：；＆/\[{(<>)}\];:&/;
+  tr/［｛（＜＞）｝］：；＆/\[{(<>)}\]:;&/;
   s/($han)($zen)/$1 $2/g;
   s/($zen)($han)/$1 $2/g;
-  s/\s+([\>\)\]\}:;]+)/$1/g;
+  s/\s+([\>\)\]\}:;]+|。、．，)/$1/g;
   s/([\[\{\(\<]+)\s+/$1/g;
 }
 
