@@ -34,14 +34,14 @@ sub init {
   $self;
 }
 
-sub translate {
+sub trans_shell {
   my $self = shift;
   my @trans_opt = @{$self->{trans}};
   my @in = map { if (ref $_) { push @trans_opt, @$_; () } else { $_ } } @_;
 
   $self->{hint} = undef;
 
-  my $original = local $_ = join ' ', @in;
+  local $_ = join ' ', @in;
   $self->preproc;
   my $c = { mask => "\x{200B}id%03d\x{200B}", unmask => qr/(?i:id)(\d{3})/ };
   my $mask = $self->mask($c, $_);
@@ -49,40 +49,38 @@ sub translate {
   binmode $tmp, ":utf8";
   print $tmp $mask;
 
-  my @trans = ('trans', @trans_opt, -i => "$tmp"); #warn "@trans";
+  $self->hint(before => $mask);
+  my @trans = ('trans', @trans_opt, -i => "$tmp");
   $_ = slurp '-|:utf8', @trans;
   s/[\x{2009}\x{200B}]//g; # thin space
-  my $trans = $_;
+  $self->hint(after => $_);
 
   $self->postproc;
-  $self->unmask({ %$c, s => $mask, t => $trans });
-
-  $self->hint(
-    "=begin before_trans\n\n",
-    $mask, "\n\n",
-    "=end before_trans\n\n",
-    "=begin after_trans\n\n",
-    $trans, "\n\n",
-    "=end after_trans\n\n",
-  );
+  $self->unmask($c);
 
   if (my %symtab = %{$c->{symtab}}) {
-    $self->hint(
-      "=begin cant_trans\n\n",
-      (map { "$_ = $symtab{$_}\n" } sort keys %symtab), "\n",
-      "=end cant_trans\n\n",
-    );
-    return $original;
+    $self->hint(cant => [ map { "$_ = $symtab{$_}" } sort keys %symtab ]);
   }
 
   $_;
 }
 
 sub hint {
-  my $self = shift;
-  $self->{hint} //= [];
-  push @{$self->{hint}}, @_ if @_;
-  wantarray? @{$self->{hint}} : $self->{hint};
+  my ($self, $key, @value) = @_;
+  if (@value) {
+    push @{$self->{hint}{$key}}, map { ref($_)? @$_ : $_ } @value;
+  }
+  my @hint;
+  for (map { ref($_)? @$_ : $_ } $key) {
+    if (my $h = $self->{hint}{$_}) {
+      push @hint, (
+        "=begin ${_}_trans\n\n",
+        (map "$_\n", @$h, ''),
+        "=end ${_}_trans\n\n",
+      );
+    }
+  }
+  wantarray ? @hint : @hint ? \@hint : undef;
 }
 
 sub mask {
@@ -152,14 +150,6 @@ sub mask {
         next;
       }
 
-      pop @stack;
-      if (!@stack && @pos) {
-        my $sym = sprintf $c->{mask}, $id++;
-        $c->{symtab}{$sym} = substr($_, $pos[-1], pos($_) - $pos[-1]);
-        push @out, $sym;
-      }
-      pop @pos;
-
     } elsif (defined $5) {
 
       if (! @stack) {
@@ -172,14 +162,6 @@ sub mask {
         next;
       }
 
-      pop @stack;
-      if (!@stack && @pos) {
-        my $sym = sprintf $c->{mask}, $id++;
-        $c->{symtab}{$sym} = substr($_, $pos[-1], pos($_) - $pos[-1]);
-        push @out, $sym;
-      }
-      pop @pos;
-
     } elsif (defined $6) {
 
       push @out, $6 unless @pos;
@@ -187,10 +169,22 @@ sub mask {
     } else {
       die "SPORK 512512!";
     }
+
+    if (defined $4 || defined $5) {
+      pop @stack;
+      if (!@stack && @pos) {
+        my $x = sprintf $c->{mask}, $id++;
+        my $y = substr($_, $pos[-1], pos($_) - $pos[-1]);
+        $c->{symtab}{$x} = $y;
+        push @out, $x;
+      }
+      pop @pos;
+    }
+
   }
 
   for (@out) {
-    s/[*$@%]?\w+(::\w+)+/do {
+    s/[*$@%&\\]?\w+(::\w+)+/do {
       my $sym = sprintf $c->{mask}, $id++;
       $c->{symtab}{$sym} = $&;
       $sym;
@@ -225,50 +219,52 @@ sub _handle_encoding_line {
 
 sub _ponder_Plain {
   my ($self, $para) = @_;
-  my $say_hints = 1;            # xxxxx
   #print "_ponder_Plain: ", Dumper($para);
-  my ($command, undef, @text) = @$para;
+  my ($command, $opts, @text) = @$para;
   if ($command =~ /^=item-text/) {
     print {$self->output_fh} "=item ";
   } elsif ($command =~ /^=item-bullet/) {
     print {$self->output_fh} "=item *\n\n";
+    @text = $self->translate(@text);
+  } elsif ($command =~ /^=item-number/) {
+    print {$self->output_fh} "=item $opts->{number}\n\n";
+    @text = $self->translate(@text);
   } elsif ($command =~ /^=/) {
     print {$self->output_fh} "$command ";
   } elsif ($command =~ /^Para/) {
-
-    unless ($self->encoding) {
-      $self->encoding('utf8');
-      binmode $self->output_fh, ":utf8";
-    }
-
-    print {$self->output_fh} "=begin original\n\n";
-    print {$self->output_fh} $_, "\n\n" for @text;
-    print {$self->output_fh} "=end original\n\n";
-
-    print {$self->output_fh} "=for engine google\n\n"	if $say_hints >= 2;
-    my @trans = $self->translate([ -e => 'google' ], @text);
-    my @hint = $self->hint;
-    print {$self->output_fh} @hint			if $say_hints >= 2;
-    if (grep /^=begin cant_trans/, @hint) {
-      print {$self->output_fh} "=for engine bing\n\n"	if $say_hints >= 2;
-      my @b = $self->translate([ -e => 'bing' ], @text);
-      my @bh = $self->hint;
-      print {$self->output_fh} @bh			if $say_hints >= 2;
-      unless (grep /^=begin cant_trans/, @bh) {
-        @trans = @b;
-        @hint = @bh;
-      }
-      print {$self->output_fh} @hint			if $say_hints == 1;
-    }
-
-    @text = @trans;
-
+    @text = $self->translate(@text);
   } else {
     print "_ponder_Plain (unknown): ", Dumper($para);
   }
-  print {$self->output_fh} $_, "\n" for @text;
-  print {$self->output_fh} "\n";
+  if (@text) {
+    chomp(@text);
+    print {$self->output_fh} $_, "\n" for @text, '';
+  }
   $self->SUPER::_ponder_Plain($para);
+}
+
+sub translate {
+  my ($self, @in) = @_;
+
+  unless ($self->encoding) {
+    $self->encoding('utf8');
+  }
+  binmode $self->output_fh, ":utf8";
+
+  print {$self->output_fh} "=begin original\n\n";
+  print {$self->output_fh} $_, "\n" for @in, '';
+  print {$self->output_fh} "=end original\n\n";
+
+  my $hint = 2;
+  print {$self->output_fh} "=for engine google\n\n"		if $hint >= 2;
+  my @out = $self->trans_shell([ -e => 'google' ], @in);
+  if ($self->hint('cant')) {
+    print {$self->output_fh} $self->hint([qw/before after cant/]) if $hint >= 2;
+    print {$self->output_fh} "=for engine bing\n\n"		if $hint >= 2;
+    my @other = $self->trans_shell([ -e => 'bing' ], @in);
+    @out = @other unless $self->hint('cant');
+  }
+  @out;
 }
 
 sub _ponder_Verbatim {
@@ -276,8 +272,7 @@ sub _ponder_Verbatim {
   #print "_ponder_Verbatim: ", Dumper($para);
   my ($command, undef, @text) = @$para;
   print {$self->output_fh} $command, ' ' if $command =~ /^=/;
-  print {$self->output_fh} $_, "\n" for @text;
-  print {$self->output_fh} "\n";
+  print {$self->output_fh} $_, "\n" for @text, '';
   $self->SUPER::_ponder_Verbatim($para);
 }
 
@@ -292,15 +287,14 @@ sub _ponder_for {
   #print "_ponder_for: ", Dumper($para,$curr_open,$paras);
   my ($command, undef, @text) = @$para;
   print {$self->output_fh} $command, ' ' if $command =~ /^=/;
-  print {$self->output_fh} $_, "\n" for @text;
-  print {$self->output_fh} "\n";
+  print {$self->output_fh} $_, "\n" for @text, '';
   $self->SUPER::_ponder_for($para,$curr_open,$paras);
 }
 
 sub _ponder_over {
   my ($self,$para,$curr_open,$paras) = @_;
-  #print "_ponder_over: ", Dumper($para,$curr_open,$paras);
-  print {$self->output_fh} "=over\n\n";
+  #print {$self->output_fh} "_ponder_over: ", Dumper($para,$curr_open,$paras);
+  print {$self->output_fh} "=over ", $para->[2], "\n\n";
   $self->SUPER::_ponder_over($para,$curr_open,$paras);
 }
 
