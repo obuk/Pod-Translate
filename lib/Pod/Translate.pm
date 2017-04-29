@@ -5,7 +5,7 @@ use strict;
 use Carp;
 
 use version;
-our $VERSION = qv('0.0.3');
+our $VERSION = qv('0.0.4');
 
 use parent qw(Pod::Simple);
 
@@ -16,6 +16,8 @@ $Data::Dumper::Terse = 1;
 use File::Temp;
 use Perl6::Slurp;
 
+__PACKAGE__->_accessorize(qw/trans_opt/);
+
 sub new {
   my $proto = shift;
   my $class = ref($proto) || $proto;
@@ -24,36 +26,36 @@ sub new {
 
 sub init {
   my ($self) = @_;
-  $self->strip_verbatim_indent(
-    sub {
-      my $lines = shift;
-      (my $indent = $lines->[0]) =~ s/\S.*//;
-      return $indent;
-    }
-  );
   $self;
 }
 
 sub trans_shell {
   my $self = shift;
-  my @trans_opt = @{$self->{trans}};
+  my @trans_opt = @{$self->trans_opt};
   my @in = map { if (ref $_) { push @trans_opt, @$_; () } else { $_ } } @_;
 
   $self->{hint} = undef;
 
   local $_ = join ' ', @in;
   $self->preproc;
-  my $c = { mask => "\x{200B}id%03d\x{200B}", unmask => qr/(?i:id)(\d{3})/ };
-  my $mask = $self->mask($c, $_);
-  my $tmp = File::Temp->new( UNLINK => 1 );
-  binmode $tmp, ":utf8";
-  print $tmp $mask;
 
-  $self->hint(before => $mask);
-  my @trans = ('trans', @trans_opt, -i => "$tmp");
-  $_ = slurp '-|:utf8', @trans;
-  s/[\x{2009}\x{200B}]//g; # thin space
-  $self->hint(after => $_);
+  my ($prefix, $digits) = ('xjqj', 3);
+  my $c = {
+    format => "${prefix}%0${digits}d",
+    search => qr/(?i:${prefix})(\d{${digits}})/,
+    symtab => { },
+    id => 1,
+  };
+
+  my $tmp = File::Temp->new(UNLINK => 1);
+  binmode $tmp, ":utf8";
+  print $tmp $self->mask($c);
+
+  $self->hint(in => $_);
+  my @trans = ('trans', @trans_opt);
+  $self->hint(proc => "@trans");
+  $_ = slurp '-|:utf8', @trans, -i => "$tmp";
+  $self->hint(out => $_);
 
   $self->postproc;
   $self->unmask($c);
@@ -73,11 +75,11 @@ sub hint {
   my @hint;
   for (map { ref($_)? @$_ : $_ } $key) {
     if (my $h = $self->{hint}{$_}) {
-      push @hint, (
-        "=begin ${_}_trans\n\n",
+      my $name = "trans_$_";
+      push @hint,
+        "=begin $name\n\n",
         (map "$_\n", @$h, ''),
-        "=end ${_}_trans\n\n",
-      );
+        "=end $name\n\n";
     }
   }
   wantarray ? @hint : @hint ? \@hint : undef;
@@ -88,9 +90,6 @@ sub mask {
 
   my @out;
   my @pos;
-
-  my $id = 1;
-  $c->{symtab} = {};
 
   my @stack;
 
@@ -173,10 +172,9 @@ sub mask {
     if (defined $4 || defined $5) {
       pop @stack;
       if (!@stack && @pos) {
-        my $x = sprintf $c->{mask}, $id++;
-        my $y = substr($_, $pos[-1], pos($_) - $pos[-1]);
-        $c->{symtab}{$x} = $y;
-        push @out, $x;
+        my $v = substr($_, $pos[-1], pos($_) - $pos[-1]);
+        $v = $&.$v if @out && $out[-1] =~ s/\S+$//; # xxxxx
+        push @out, $self->symtab($c, $v);
       }
       pop @pos;
     }
@@ -184,20 +182,23 @@ sub mask {
   }
 
   for (@out) {
-    s/[*$@%&\\]?\w+(::\w+)+/do {
-      my $sym = sprintf $c->{mask}, $id++;
-      $c->{symtab}{$sym} = $&;
-      $sym;
-    }/eg;
+    s/[*$@%&\\]?\w+(::\w+)+/$self->symtab($c, $&)/eg;
   }
 
-  join '', @out;
+  $_ = join '', @out;
+}
+
+sub symtab {
+  my ($self, $c, $v) = @_;
+  my $k = sprintf $c->{format}, $c->{id}++;
+  $c->{symtab}{$k} = $v;
+  $k;
 }
 
 sub unmask {
   my ($self, $c) = @_;
-  s/$c->{unmask}/do {
-    my $k = sprintf $c->{mask}, $1;
+  s/$c->{search}/do {
+    my $k = sprintf $c->{format}, $1;
     my $v = $c->{symtab}{$k};
     delete $c->{symtab}{$k};
     $v || $k;
@@ -206,6 +207,7 @@ sub unmask {
 }
 
 sub preproc {
+  s/[BI]<([[a-z\d\s:;,.]*)>/$1/g;
 }
 
 sub postproc {
@@ -255,14 +257,14 @@ sub translate {
   print {$self->output_fh} $_, "\n" for @in, '';
   print {$self->output_fh} "=end original\n\n";
 
-  my $hint = 2;
-  print {$self->output_fh} "=for engine google\n\n"		if $hint >= 2;
-  my @out = $self->trans_shell([ -e => 'google' ], @in);
-  if ($self->hint('cant')) {
-    print {$self->output_fh} $self->hint([qw/before after cant/]) if $hint >= 2;
-    print {$self->output_fh} "=for engine bing\n\n"		if $hint >= 2;
-    my @other = $self->trans_shell([ -e => 'bing' ], @in);
-    @out = @other unless $self->hint('cant');
+  my $hint = 1;
+  my @out;
+  for my $option ([ -e => 'google' ], [ -e => 'bing' ]) {
+    @out = $self->trans_shell($option, @in);
+    print {$self->output_fh} $self->hint([qw/in out proc/])     if $hint;
+    last unless my @cant = $self->hint('cant');
+    print {$self->output_fh} @cant                              if $hint;
+    @out = @in;
   }
   @out;
 }
