@@ -6,7 +6,7 @@ use Carp;
 
 use version;
 our $VERSION = qv('0.0.4');
-
+BEGIN { *DEBUG = sub () {0} unless defined &DEBUG }
 use parent qw(Pod::Simple);
 
 use Data::Dumper;
@@ -26,7 +26,19 @@ sub new {
 
 sub init {
   my ($self) = @_;
+  $self->code_handler(\&code_process);
+  $self->cut_handler(\&cut_process);
   $self;
+}
+
+sub code_process {
+  my ($line, $line_count, $self) = @_;
+  print {$self->output_fh} $line, "\n";
+}
+
+sub cut_process {
+  my ($line, $line_count, $self) = @_;
+  print {$self->output_fh} "=cut", "\n";
 }
 
 sub trans_shell {
@@ -39,10 +51,25 @@ sub trans_shell {
   local $_ = join ' ', @in;
   $self->preproc;
 
-  my ($prefix, $digits) = ('xjqj', 3);
+=begin comment
+
+make $magic word that hardly appears in the dictionaries.
+
+  $ ./script/magic.pl --length 4 --verbose /usr/share/dict/*
+  0: x (773), 0: y (1580), 0: z (2002)
+  1: j (126), 1: z (522), 1: k (1189)
+  2: q (852), 2: j (1072), 2: z (1402)
+  3: j (824), 3: q (1007), 3: x (1548)
+  xjqj
+
+=end comment
+
+=cut
+
+  my ($magic, $digits) = ('xjqj', 3);
   my $c = {
-    format => "${prefix}%0${digits}d",
-    search => qr/(?i:${prefix})(\d{${digits}})/,
+    format => "${magic}%0${digits}d",
+    search => qr/(?i:${magic})(\d{${digits}})/,
     symtab => { },
     id => 1,
   };
@@ -221,7 +248,6 @@ sub _handle_encoding_line {
 
 sub _ponder_Plain {
   my ($self, $para) = @_;
-  #print "_ponder_Plain: ", Dumper($para);
   my ($command, $opts, @text) = @$para;
   if ($command =~ /^=item-text/) {
     print {$self->output_fh} "=item ";
@@ -236,7 +262,7 @@ sub _ponder_Plain {
   } elsif ($command =~ /^Para/) {
     @text = $self->translate(@text);
   } else {
-    print "_ponder_Plain (unknown): ", Dumper($para);
+    die "_ponder_Plain (? $command): ", Dumper($para);
   }
   if (@text) {
     chomp(@text);
@@ -257,13 +283,12 @@ sub translate {
   print {$self->output_fh} $_, "\n" for @in, '';
   print {$self->output_fh} "=end original\n\n";
 
-  my $hint = 1;
   my @out;
   for my $option ([ -e => 'google' ], [ -e => 'bing' ]) {
     @out = $self->trans_shell($option, @in);
-    print {$self->output_fh} $self->hint([qw/in out proc/])     if $hint;
+    print {$self->output_fh} $self->hint([qw/in out proc/])     if DEBUG;
     last unless my @cant = $self->hint('cant');
-    print {$self->output_fh} @cant                              if $hint;
+    print {$self->output_fh} @cant                              if DEBUG;
     @out = @in;
   }
   @out;
@@ -271,38 +296,27 @@ sub translate {
 
 sub _ponder_Verbatim {
   my ($self, $para) = @_;
-  #print "_ponder_Verbatim: ", Dumper($para);
   my ($command, undef, @text) = @$para;
-  print {$self->output_fh} $command, ' ' if $command =~ /^=/;
-  print {$self->output_fh} $_, "\n" for @text, '';
+  print {$self->output_fh} $_, "\n" for @text;
   $self->SUPER::_ponder_Verbatim($para);
-}
-
-sub _ponder_Data {
-  my ($self, $para) = @_;
-  print "_ponder_Data: ", Dumper($para);
-  $self->SUPER::_ponder_Data($para);
 }
 
 sub _ponder_for {
   my ($self,$para,$curr_open,$paras) = @_;
-  #print "_ponder_for: ", Dumper($para,$curr_open,$paras);
   my ($command, undef, @text) = @$para;
-  print {$self->output_fh} $command, ' ' if $command =~ /^=/;
-  print {$self->output_fh} $_, "\n" for @text, '';
+  print {$self->output_fh} $command, ' ';
+  print {$self->output_fh} $_, "\n" for @text;
   $self->SUPER::_ponder_for($para,$curr_open,$paras);
 }
 
 sub _ponder_over {
   my ($self,$para,$curr_open,$paras) = @_;
-  #print {$self->output_fh} "_ponder_over: ", Dumper($para,$curr_open,$paras);
   print {$self->output_fh} "=over ", $para->[2], "\n\n";
   $self->SUPER::_ponder_over($para,$curr_open,$paras);
 }
 
 sub _ponder_back {
   my ($self,$para,$curr_open,$paras) = @_;
-  #print "_ponder_back: ", Dumper($para,$curr_open,$paras);
   print {$self->output_fh} "=back\n\n";
   $self->SUPER::_ponder_back($para,$curr_open,$paras);
 }
