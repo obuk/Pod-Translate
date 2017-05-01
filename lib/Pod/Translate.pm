@@ -38,7 +38,7 @@ sub code_process {
 
 sub cut_process {
   my ($line, $line_count, $self) = @_;
-  print {$self->output_fh} "=cut", "\n";
+  print {$self->output_fh} "\n", "=cut", "\n";
 }
 
 sub trans_shell {
@@ -305,7 +305,7 @@ sub _ponder_for {
   my ($self,$para,$curr_open,$paras) = @_;
   my ($command, undef, @text) = @$para;
   print {$self->output_fh} $command, ' ';
-  print {$self->output_fh} $_, "\n" for @text;
+  print {$self->output_fh} $_, "\n" for @text, '';
   $self->SUPER::_ponder_for($para,$curr_open,$paras);
 }
 
